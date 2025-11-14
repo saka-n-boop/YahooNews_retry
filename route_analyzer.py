@@ -16,19 +16,24 @@ WAYPOINT_COLUMNS_INDICES = list(range(13, 23)) # N列(13)からW列(22)まで
 # --- APIクライアント初期化 ---
 try:
     # 1. Google Sheets 認証設定 (サービスアカウント)
-    sa_key_json = os.environ.get('GCP_SERVICE_ACCOUNT_KEY')
-    if not sa_key_json:
+    sa_key_json_string = os.environ.get('GCP_SERVICE_ACCOUNT_KEY')
+    if not sa_key_json_string:
         raise ValueError("GCP_SERVICE_ACCOUNT_KEY not found in environment variables.")
 
-    # gspreadが参照できるように一時ファイルに書き込み
+    # JSON文字列を一度パースし、整形して一時ファイルに書き出す (改行/パース問題の解消)
+    sa_key_data = json.loads(sa_key_json_string)
+    
+    # 一時ファイルに書き出し
     with open('service_account_key.json', 'w') as f:
-        f.write(sa_key_json)
+        # indent=2で書き出すことで、可読性と安全性を高める
+        json.dump(sa_key_data, f, indent=2) 
 
-    # 認証
+    # 認証情報をファイルから読み込み
     creds = Credentials.from_service_account_file('service_account_key.json', scopes=[
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ])
+    # gspreadクライアントを認証
     gc = gspread.authorize(creds)
     
     # 2. Gemini API クライアント初期化
@@ -38,7 +43,6 @@ try:
 
 except Exception as e:
     print(f"API Client Initialization Error: {e}")
-    # 認証失敗は致命的なのでプログラムを終了させる
     exit(1)
 
 
@@ -53,15 +57,15 @@ def get_video_id(url: str) -> Optional[str]:
     return None
 
 def get_transcript(video_id: str) -> Optional[str]:
+    """YouTube動画のトランスクリプトを取得する"""
     try:
-        result = YouTubeTranscriptApi.get_transcripts([video_id], languages=['ja', 'en'])
-        transcript_list = result.get(video_id)
-        if transcript_list:
-            full_transcript = " ".join([item['text'] for item in transcript_list])
-            return full_transcript
-        else:
-            print(f"  > Error: No transcript found for video {video_id}.")
-            return None
+        # 正しい関数名: YouTubeTranscriptApi.get_transcript を使用
+        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ja', 'en']) 
+        
+        # 結果はリストで返ってくるため、そのまま結合する
+        full_transcript = " ".join([item['text'] for item in transcript_list])
+        return full_transcript
+        
     except TranscriptsDisabled:
         print(f"  > Error: Transcripts are disabled for video {video_id}.")
         return None
@@ -121,9 +125,8 @@ def main():
     print("--- YouTube Route Analyzer Start ---")
 
     try:
-        # gspreadクライアントでスプレッドシートを開く
-        spreadsheet = gc.open_by_key(SPREADSHEET_ID)
-        sheet = spreadsheet.worksheet('trial')
+        # gspreadクライアントでスプレッドシートを開く (IDとシート1で統一)
+        sheet = gc.open_by_id(SPREADSHEET_ID).sheet1
         
         # 全データを取得し、ヘッダー行(1行目)をスキップ
         all_data = sheet.get_all_values()
