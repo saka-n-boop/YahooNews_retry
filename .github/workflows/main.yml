@@ -1,48 +1,36 @@
 name: Analyze YouTube Routes
 
 on:
-  # 自動実行（スケジュール）を完全に削除
-  
-  # 手動実行のみを定義
   workflow_dispatch:
-    # 必要に応じて、手動実行時に任意の入力を受け付ける設定を追加できますが、
-    # 今回は最小限の設定とします。
 
 jobs:
   analyze-route:
-    # 実行環境を指定
     runs-on: ubuntu-latest
-    
-    # 実行ステップ
+
     steps:
     - name: Checkout repository
-      # リポジトリのコードを最新版でチェックアウト
       uses: actions/checkout@v4
 
     - name: Set up Python
-      # Python環境のセットアップ
       uses: actions/setup-python@v5
       with:
-        # Pythonのバージョンを指定
-        python-version: '3.11' # 一般的な最新安定版として3.11を推奨します
+        python-version: '3.11'
 
     - name: Install dependencies
-      # 必要なPythonパッケージをインストール
       run: |
         python -m pip install --upgrade pip
-        pip install -r requirements.txt
+        python -m pip install -r requirements.txt
+
+    - name: Show installed packages
+      run: python -m pip list
 
     - name: Run Route Analyzer
-      # 環境変数を設定し、メインスクリプトを実行
       env:
-        # Google SheetsとGemini APIに必要なシークレットを設定
         YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }} # Gemini APIキー
-        GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }} # Google Sheetsアクセス用
-      run: |
-        python route_analyzer.py # 実行するスクリプト名に合わせて変更
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+      run: python route_analyzer.py
 
     - name: Check for workflow failure (optional)
-      # 処理失敗時にログを残すためのステップ（オプション）
       if: ${{ failure() }}
       run: echo "Workflow failed. Check logs for details."
