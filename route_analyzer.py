@@ -55,16 +55,22 @@ def get_video_id(url: str) -> Optional[str]:
 def get_transcript(video_id: str) -> Optional[str]:
     """YouTube動画のトランスクリプトを取得する"""
     try:
-        transcript_list = YouTubeTranscriptApi.get_transcript(video_id, languages=['ja', 'en'])
-        full_transcript = " ".join([item['text'] for item in transcript_list])
-        return full_transcript
-        
-    except TranscriptsDisabled:
-        print(f"  > Error: Transcripts are disabled for video {video_id}.")
-        return None
-    except Exception as e:
-        print(f"  > Error: Failed to get transcript for {video_id}. {e}")
-        return None
+        # transcript_listは辞書 {video_id: [transcript_items]}
+        result = YouTubeTranscriptApi.get_transcripts([video_id], languages=['ja', 'en'])
+        transcript_list = result.get(video_id)
+        if transcript_list:
+            # テキスト部分だけを連結して返す
+            full_transcript = " ".join([item['text'] for item in transcript_list])
+            return full_transcript
+        else:
+            print(f"  > Error: No transcript found for video {video_id}.")
+            return None
+        except TranscriptsDisabled:
+            print(f"  > Error: Transcripts are disabled for video {video_id}.")
+            return None
+        except Exception as e:
+            print(f"  > Error: Failed to get transcript for {video_id}. {e}")
+            return None
 
 def analyze_route_with_gemini(transcript: str) -> Dict[str, List[str]]:
     """Gemini APIを使用してトランスクリプトからルート情報を分析する"""
