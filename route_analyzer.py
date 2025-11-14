@@ -125,8 +125,8 @@ def main():
     print("--- YouTube Route Analyzer Start ---")
 
     try:
-        # gspreadクライアントでスプレッドシートを開く (IDとシート1で統一)
-        sheet = gc.open_by_id(SPREADSHEET_ID).sheet1
+        # gspreadクライアントでスプレッドシートを開く (open_by_key()に修正)
+        sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
         
         # 全データを取得し、ヘッダー行(1行目)をスキップ
         all_data = sheet.get_all_values()
