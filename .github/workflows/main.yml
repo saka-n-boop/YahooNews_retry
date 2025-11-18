@@ -1,70 +1,46 @@
 name: Analyze YouTube Routes
 
 on:
-
-#手動実行を可能にする
-
-workflow_dispatch:
+  workflow_dispatch:
 
 jobs:
-analyze-route:
-runs-on: ubuntu-latest
+  analyze-route:
+    runs-on: ubuntu-latest
 
-steps:
-- name: Checkout repository
-  uses: actions/checkout@v4
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-- name: Set up Python
-  uses: actions/setup-python@v5
-  with:
-    python-version: '3.11'
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
 
-- name: Upgrade pip
-  run: python -m pip install --upgrade pip
+    - name: Upgrade pip
+      run: python -m pip install --upgrade pip
 
-# 依存関係をインストール（requirements.txtが必要です）
-- name: Install dependencies from requirements.txt
-  run: python -m pip install --no-cache-dir -r requirements.txt
+    - name: Install dependencies from requirements.txt
+      run: python -m pip install --no-cache-dir -r requirements.txt
 
-# 既存のyoutube-transcript-apiを確実にアンインストール
-- name: Uninstall any existing youtube-transcript-api (prevent PyPI conflict)
-  run: python -m pip uninstall -y youtube-transcript-api || true
+    - name: Uninstall any existing youtube-transcript-api (prevent PyPI conflict)
+      run: python -m pip uninstall -y youtube-transcript-api || true
 
-# 公式GitHubリポジトリから指定バージョンをインストール
-- name: Install youtube-transcript-api from official GitHub
-  run: python -m pip install --no-cache-dir git+https://github.com/jdepoix/youtube-transcript-api.git@v1.2.3
+    - name: Install youtube-transcript-api from official GitHub
+      run: python -m pip install --no-cache-dir git+https://github.com/jdepoix/youtube-transcript-api.git@v1.2.3
 
-# インストール状態を確認（デバッグ用）
-- name: Show installed packages and youtube-transcript-api details
-  run: |
-    echo "Installed Packages:"
-    python -m pip list
-    echo "youtube_transcript_api file path:"
-    python -c "import youtube_transcript_api; print('PATH:', youtube_transcript_api.__file__)"
-    echo "YouTubeTranscriptApi class content:"
-    python -c "from youtube_transcript_api import YouTubeTranscriptApi; print('YouTubeTranscriptApi dir:', dir(YouTubeTranscriptApi))"
+    - name: Show installed packages and youtube-transcript-api details
+      run: |
+        python -m pip list
+        python -c "import youtube_transcript_api; print('PATH:', youtube_transcript_api.__file__)"
+        python -c "from youtube_transcript_api import YouTubeTranscriptApi; print('YouTubeTranscriptApi dir:', dir(YouTubeTranscriptApi))"
 
-- name: Run Route Analyzer
-  env:
-    # 環境変数はセキュリティ変数から取得
-    YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-    GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-    GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-  run: python route_analyzer.py
+    - name: Run Route Analyzer
+      env:
+        YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+      run: python route_analyzer.py
 
-# ワークフロー失敗時に通知
-- name: Check for workflow failure
-  if: ${{ failure() }}
-  run: echo "Workflow failed. Check logs for details."
-
-
-eof
-
-### 補足：Pythonコードについて
-
-YAMLでライブラリのインストールを修正したため、Pythonコードは最後に私が提案した、モジュール名直下で関数を呼び出す形式（最も安定した形式）を維持してください。
-
-```python
-# get_transcript 関数内:
-# 修正: モジュール名から直接get_transcriptを呼び出します
-transcript_list = youtube_transcript_api.get_transcript(video_id, languages=['ja', 'en'])
+    - name: Check for workflow failure (optional)
+      if: ${{ failure() }}
+      run: echo "Workflow failed. Check logs for details."
