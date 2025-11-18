@@ -22,8 +22,9 @@ jobs:
     - name: Install dependencies from requirements.txt
       run: python -m pip install --no-cache-dir -r requirements.txt
 
-    - name: Uninstall any existing youtube-transcript-api (prevent PyPI conflict)
-      run: python -m pip uninstall -y youtube-transcript-api || true
+    - name: Remove existing youtube_transcript_api from site-packages
+      run: |
+        find /opt/hostedtoolcache/Python/3.11.14/x64/lib/python3.11/site-packages/ -type d -name 'youtube_transcript_api' | xargs rm -rf || true
 
     - name: Install youtube-transcript-api from official GitHub
       run: python -m pip install --no-cache-dir git+https://github.com/jdepoix/youtube-transcript-api.git@v1.2.3
