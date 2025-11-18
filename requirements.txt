@@ -4,7 +4,7 @@ google-auth
 oauth2client
 
 # YouTubeのトランスクリプト取得に特化したライブラリ
-youtube-transcript-api
+youtube-transcript-api==1.2.3
 
 google-generativeai
 
