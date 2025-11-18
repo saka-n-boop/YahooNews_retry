@@ -2,7 +2,7 @@ name: Analyze YouTube Routes
 
 on:
 
-手動実行を可能にする
+#手動実行を可能にする
 
 workflow_dispatch:
 
