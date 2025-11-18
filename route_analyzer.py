@@ -22,17 +22,13 @@ try:
 
     # JSON文字列を一度パースし、整形して一時ファイルに書き出す (改行/パース問題の解消)
     sa_key_data = json.loads(sa_key_json_string)
-    
-    # 一時ファイルに書き出し
     with open('service_account_key.json', 'w') as f:
         json.dump(sa_key_data, f, indent=2) 
 
-    # 認証情報をファイルから読み込み
     creds = Credentials.from_service_account_file('service_account_key.json', scopes=[
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive"
     ])
-    # gspreadクライアントを認証
     gc = gspread.authorize(creds)
     
     # 2. Gemini API クライアント初期化
@@ -42,7 +38,6 @@ try:
 except Exception as e:
     print(f"API Client Initialization Error: {e}")
     exit(1)
-
 
 # --- 関数定義 ---
 
@@ -69,16 +64,13 @@ def get_transcript(video_id: str) -> Optional[str]:
 
 def analyze_route_with_gemini(transcript: str) -> Dict[str, List[str]]:
     """Gemini APIを使用してトランスクリプトからルート情報を分析する"""
-    
     prompt = f"""
     あなたは、自動車レビューと地理に精通した**プロのテストドライバー**です。
     提供されたトランスクリプトを分析し、車両のレビュー目的で走行した具体的な**スタート地点、経由地、終着地点**を特定してください。
     特に、**具体的な道路名、IC/JCT名、およびランドマーク**を抽出することに重点を置いてください。
-    
     --- トランスクリプト ---
     {transcript}
     """
-    
     try:
         config = genai.types.GenerateContentConfig(
             response_mime_type="application/json",
@@ -109,7 +101,6 @@ def analyze_route_with_gemini(transcript: str) -> Dict[str, List[str]]:
 def main():
     """メイン処理"""
     print("--- YouTube Route Analyzer Start ---")
-
     try:
         sheet = gc.open_by_key(SPREADSHEET_ID).sheet1
         all_data = sheet.get_all_values()
@@ -165,7 +156,6 @@ def main():
             print("Successfully updated the spreadsheet.")
         else:
             print("\nNo new rows needed analysis or update.")
-            
     except Exception as e:
         print(f"\nFATAL ERROR in main execution: {e}")
     finally:
