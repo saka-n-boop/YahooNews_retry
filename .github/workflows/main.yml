@@ -1,47 +1,38 @@
-name: Analyze YouTube Routes
+name: Yahoo News Scraper and Gemini Analyzer
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
-  analyze-route:
+  run-script:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-    - name: Upgrade pip
-      run: python -m pip install --upgrade pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          
+          # --- (修正箇所) ---
+          # Gemimni APIのエラー (module 'google.genai' has no attribute 'configure') 対策
+          # キャッシュを無効化 (--no-cache-dir) し、強制的に最新版をインストールします。
+          pip install --no-cache-dir --upgrade google-generativeai
+          # --- (修正ここまで) ---
 
-    - name: Install dependencies from requirements.txt
-      run: python -m pip install --no-cache-dir -r requirements.txt
-
-    - name: Remove existing youtube_transcript_api from site-packages
-      run: |
-        find /opt/hostedtoolcache/Python/3.11.14/x64/lib/python3.11/site-packages/ -type d -name 'youtube_transcript_api' | xargs rm -rf || true
-
-    - name: Install youtube-transcript-api from official GitHub
-      run: python -m pip install --no-cache-dir git+https://github.com/jdepoix/youtube-transcript-api.git@v1.2.3
-
-    - name: Show installed packages and youtube-transcript-api details
-      run: |
-        python -m pip list
-        python -c "import youtube_transcript_api; print('PATH:', youtube_transcript_api.__file__)"
-        python -c "from youtube_transcript_api import YouTubeTranscriptApi; print('YouTubeTranscriptApi dir:', dir(YouTubeTranscriptApi))"
-
-    - name: Run Route Analyzer
-      env:
-        YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
-        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
-        GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
-      run: python route_analyzer.py
-
-    - name: Check for workflow failure (optional)
-      if: ${{ failure() }}
-      run: echo "Workflow failed. Check logs for details."
+      - name: Run Python script
+        env:
+          GCP_SERVICE_ACCOUNT_KEY: ${{ secrets.GCP_SERVICE_ACCOUNT_KEY }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          SPREADSHEET_KEY: ${{ secrets.SPREADSHEET_KEY }}
+        run: python main.py
