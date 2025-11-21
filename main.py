@@ -408,8 +408,8 @@ keys: "sentiment", "category", "company_info", "nissan_mention", "nissan_sentime
 
 def update_sheets_data(gc):
     """記事収集、詳細更新、コメント分離を一括実行"""
-    ws_source = get_worksheet(gc, "SOURCE")
-    ws_comments = get_worksheet(gc, "コメントシート")
+    ws_source = get_worksheet(gc, "News")
+    ws_comments = get_worksheet(gc, "Comments")
 
     if not ws_source or not ws_comments: return
 
@@ -493,11 +493,11 @@ def update_sheets_data(gc):
             time.sleep(2)
 
     if batch_source:
-        print(f"  ... {len(batch_source)} 件の詳細データを SOURCEシートへ更新中...")
+        print(f"  ... {len(batch_source)} 件の詳細データを Newsシートへ更新中...")
         ws_source.batch_update(batch_source, value_input_option="USER_ENTERED")
     
     if batch_comments:
-        print(f"  ... {len(batch_comments)} 件のコメントを コメントシートへ追記中...")
+        print(f"  ... {len(batch_comments)} 件のコメントを Commentsシートへ追記中...")
         ws_comments.append_rows(batch_comments, value_input_option="USER_ENTERED")
 
 
@@ -507,7 +507,7 @@ def analyze_gemini_new(gc):
         print("  Gemini未設定のため分析スキップ")
         return
 
-    ws = get_worksheet(gc, "SOURCE")
+    ws = get_worksheet(gc, "News")
     all_rows = ws.get_all_values()
     if len(all_rows) <= 1: return
     
@@ -565,7 +565,7 @@ def analyze_gemini_new(gc):
 
 def sort_source_sheet(gc):
     """SOURCEシートを投稿日時(C列)で降順ソート"""
-    ws = get_worksheet(gc, "SOURCE")
+    ws = get_worksheet(gc, "News")
     if not ws: return
     print("  SOURCEシートを日時順にソート中...")
     try:
@@ -588,4 +588,24 @@ def sort_source_sheet(gc):
 def main():
     print("--- 統合スクリプト開始 ---")
     
-    gc
+    gc = setup_gspread()
+    if not gc: return
+    
+    if not load_prompts():
+        print("  ⚠️ プロンプト読み込み失敗")
+
+    initialize_gemini()
+
+    # Step 1 & 2: 収集・詳細・コメント分離
+    update_sheets_data(gc)
+    
+    # Step 3: ソート
+    sort_source_sheet(gc)
+    
+    # Step 4: 分析
+    analyze_gemini_new(gc)
+
+    print("--- 全処理完了 ---")
+
+if __name__ == "__main__":
+    main()
