@@ -43,7 +43,7 @@ PROMPT_FILES = {
 PROMPTS = {}
 
 # --- ヘッダー定義 (ユーザー要望反映) ---
-# SOURCEシート: 記事一覧・本文・分析結果
+# Newsシート: 記事一覧・本文・分析結果
 HEADER_SOURCE = [
     "URL",          # A列
     "タイトル",     # B列
@@ -150,7 +150,7 @@ def check_and_set_headers(ws, expected_headers):
 
 
 def load_existing_urls(ws):
-    """SOURCEシートのA列(URL)を読み込み、セットで返す"""
+    """NewsシートのA列(URL)を読み込み、セットで返す"""
     try:
         urls = ws.col_values(1) # A列
         return set(urls[1:]) # ヘッダー除く
@@ -476,7 +476,7 @@ def update_sheets_data(gc):
             if dt_obj:
                 final_time = dt_obj.astimezone(timedelta(hours=9)).strftime("%Y/%m/%d %H:%M:%S")
 
-            # SOURCEシート更新用データ (C列～O列)
+            # Newsシート更新用データ (C列～O列)
             # C:Time, D:Source, E-N:Body, O:Count
             update_vals = [final_time, source] + body_parts + [c_count]
             
@@ -564,10 +564,10 @@ def analyze_gemini_new(gc):
 
 
 def sort_source_sheet(gc):
-    """SOURCEシートを投稿日時(C列)で降順ソート"""
+    """Newsシートを投稿日時(C列)で降順ソート"""
     ws = get_worksheet(gc, "News")
     if not ws: return
-    print("  SOURCEシートを日時順にソート中...")
+    print("  Newsシートを日時順にソート中...")
     try:
         req = {
             "sortRange": {
