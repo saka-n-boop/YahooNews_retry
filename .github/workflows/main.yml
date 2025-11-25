@@ -2,9 +2,9 @@ name: Yahoo News Scraper and Gemini Analyzer
 
 on:
   workflow_dispatch:
-  # 定期実行する場合
-   schedule:
-     - cron: '0 21 * * *' # 時間指定の記述漏れを防ぐため例を入れています
+  # 定期実行 (UTC 23:00 = JST 08:00)
+  schedule:
+    - cron: '0 23 * * *'
 
 jobs:
   run-script:
@@ -24,8 +24,8 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
           
-          # 明示的にキャッシュ無効化で最新版を入れる（エラー対策として有効）
-          pip install --no-cache-dir --upgrade google-generativeai
+          # 【重要】プログラムに合わせて最新のSDKを指定 (google-genai)
+          pip install --no-cache-dir --upgrade google-genai
 
       - name: Run Python script
         env:
