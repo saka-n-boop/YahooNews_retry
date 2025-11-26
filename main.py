@@ -27,7 +27,7 @@ from google.api_core.exceptions import ResourceExhausted
 # ------------------------------------
 
 # ====== 設定 ======
-# 【改修①】スプレッドシートIDをGithub Secretsの環境変数 "SPREADSHEET_KEY" から取得
+# スプレッドシートIDをGithub Secretsの環境変数 "SPREADSHEET_KEY" から取得
 SHARED_SPREADSHEET_ID = os.environ.get("SPREADSHEET_KEY")
 if not SHARED_SPREADSHEET_ID:
     print("エラー: 環境変数 'SPREADSHEET_KEY' が設定されていません。処理を中断します。")
@@ -39,27 +39,25 @@ SOURCE_SHEET_NAME = "Yahoo"
 DEST_SPREADSHEET_ID = SHARED_SPREADSHEET_ID
 MAX_SHEET_ROWS_FOR_REPLACE = 10000
 
-# 【改修】最大取得ページ数を10に設定
+# 最大取得ページ数を10に設定
 MAX_PAGES = 10 
 
-# 【改修③】ヘッダーにJ列（日産関連文）、K列（日産ネガ文）を追加
+# ヘッダー (J列, K列を含む)
 YAHOO_SHEET_HEADERS = ["URL", "タイトル", "投稿日時", "ソース", "本文", "コメント数", "対象企業", "カテゴリ分類", "ポジネガ分類", "日産関連文", "日産ネガ文"]
 REQ_HEADERS = {"User-Agent": "Mozilla/5.0"}
 TZ_JST = timezone(timedelta(hours=9))
 
-PROMPT_FILES = [
+# プロンプトファイル（全てまとめて読み込みます）
+ALL_PROMPT_FILES = [
     "prompt_gemini_role.txt",
     "prompt_posinega.txt",
     "prompt_category.txt",
-    "prompt_target_company.txt"
-]
-
-NISSAN_PROMPT_FILES = [
+    "prompt_target_company.txt",
     "prompt_nissan_mention.txt",
     "prompt_nissan_sentiment.txt"
 ]
 
-# 【改修②】Gemini API Keyを環境変数 "GOOGLE_API_KEY" から読み込む
+# Gemini API Key
 try:
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
@@ -72,7 +70,6 @@ except Exception as e:
     GEMINI_CLIENT = None
 
 GEMINI_PROMPT_TEMPLATE = None
-NISSAN_PROMPT_TEMPLATE = None
 
 # ====== ヘルパー関数群 ======
 
@@ -145,7 +142,8 @@ def load_keywords(filename: str) -> List[str]:
         print(f"キーワードファイルの読み込みエラー: {e}")
         return []
 
-def load_gemini_prompt() -> str:
+def load_merged_prompt() -> str:
+    """ 全てのプロンプトファイルを結合して読み込む """
     global GEMINI_PROMPT_TEMPLATE
     if GEMINI_PROMPT_TEMPLATE is not None:
         return GEMINI_PROMPT_TEMPLATE
@@ -153,13 +151,15 @@ def load_gemini_prompt() -> str:
     combined_instructions = []
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        role_instruction = ""
-        role_file = PROMPT_FILES[0]
+        
+        # 役割定義 (最初のファイル)
+        role_file = ALL_PROMPT_FILES[0]
         file_path = os.path.join(script_dir, role_file)
         with open(file_path, 'r', encoding='utf-8') as f:
             role_instruction = f.read().strip()
         
-        for filename in PROMPT_FILES[1:]:
+        # 残りの指示書 (通常分析 + 日産分析)
+        for filename in ALL_PROMPT_FILES[1:]:
             file_path = os.path.join(script_dir, filename)
             with open(file_path, 'r', encoding='utf-8') as f:
                 content = f.read().strip()
@@ -167,6 +167,10 @@ def load_gemini_prompt() -> str:
                 combined_instructions.append(content)
                         
         base_prompt = role_instruction + "\n" + "\n".join(combined_instructions)
+        
+        # 【重要】変な文章が入らないように指示を強化
+        base_prompt += "\n\n【重要】\n日産に関する言及がない場合、またはネガティブな文脈がない場合は、説明文を書かずに、必ず『なし』という単語のみを出力してください。"
+        
         base_prompt += "\n\n記事本文:\n{TEXT_TO_ANALYZE}"
 
         GEMINI_PROMPT_TEMPLATE = base_prompt
@@ -175,42 +179,11 @@ def load_gemini_prompt() -> str:
         print(f"致命的エラー: プロンプトファイルの読み込み中にエラー: {e}")
         return ""
 
-def load_nissan_prompt() -> str:
-    global NISSAN_PROMPT_TEMPLATE
-    if NISSAN_PROMPT_TEMPLATE is not None:
-        return NISSAN_PROMPT_TEMPLATE
-        
-    combined_instructions = []
-    try:
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        role_instruction = ""
-        role_file = PROMPT_FILES[0]
-        file_path = os.path.join(script_dir, role_file)
-        with open(file_path, 'r', encoding='utf-8') as f:
-            role_instruction = f.read().strip()
-        
-        for filename in NISSAN_PROMPT_FILES:
-            file_path = os.path.join(script_dir, filename)
-            with open(file_path, 'r', encoding='utf-8') as f:
-                content = f.read().strip()
-            if content:
-                combined_instructions.append(content)
-                        
-        base_prompt = role_instruction + "\n" + "\n".join(combined_instructions)
-        base_prompt += "\n\n記事本文:\n{TEXT_TO_ANALYZE}"
-
-        NISSAN_PROMPT_TEMPLATE = base_prompt
-        return base_prompt
-    except Exception as e:
-        print(f"エラー: 日産用プロンプトファイルの読み込み中にエラー: {e}")
-        return ""
-
 def request_with_retry(url: str, max_retries: int = 3) -> Optional[requests.Response]:
     for attempt in range(max_retries):
         try:
             res = requests.get(url, headers=REQ_HEADERS, timeout=20)
             if res.status_code == 404:
-                # ページが存在しない場合はNoneを返す
                 return None
             res.raise_for_status()
             return res
@@ -244,19 +217,46 @@ def set_row_height(ws: gspread.Worksheet, row_height_pixels: int):
     except Exception as e:
         print(f" ?? 行高設定エラー: {e}")
 
-# ====== Gemini 分析関数 ======
-def analyze_with_gemini(text_to_analyze: str) -> Tuple[str, str, str, bool]:
-    if not GEMINI_CLIENT:
-        return "N/A", "N/A", "N/A", False
-    if not text_to_analyze.strip():
-        return "N/A", "N/A", "N/A", False
+def update_sheet_with_retry(ws, range_name, values, max_retries=3):
+    """ スプレッドシート更新のリトライラッパー (502/503エラー対策) """
+    for attempt in range(max_retries):
+        try:
+            ws.update(range_name=range_name, values=values, value_input_option='USER_ENTERED')
+            return
+        except gspread.exceptions.APIError as e:
+            error_str = str(e)
+            if any(code in error_str for code in ['500', '502', '503']):
+                wait_seconds = 30 * (attempt + 1)
+                print(f"  ?? Google API Server Error (502/503). {wait_seconds}秒待機してリトライします... ({attempt+1}/{max_retries})")
+                time.sleep(wait_seconds)
+            else:
+                raise e
+        except Exception as e:
+            wait_seconds = 10 * (attempt + 1)
+            print(f"  ?? 書き込みエラー: {e}. {wait_seconds}秒待機してリトライします...")
+            time.sleep(wait_seconds)
+    print(f"  !! 最終リトライ失敗: {range_name} の更新をスキップします。")
 
-    prompt_template = load_gemini_prompt()
+
+# ====== Gemini 分析関数 (統合版) ======
+def analyze_article_full(text_to_analyze: str) -> Dict[str, str]:
+    """ 
+    記事を分析し、企業情報、カテゴリ、ポジネガ、日産関連、日産ネガの5項目を一度に取得する 
+    """
+    default_res = {
+        "company_info": "N/A", "category": "N/A", "sentiment": "N/A",
+        "nissan_related": "なし", "nissan_negative": "なし"
+    }
+
+    if not GEMINI_CLIENT or not text_to_analyze.strip():
+        return default_res
+
+    prompt_template = load_merged_prompt()
     if not prompt_template:
-        return "ERROR(Prompt Missing)", "ERROR", "ERROR", False
+        return default_res
 
     MAX_RETRIES = 3
-    MAX_CHARACTERS = 15000 # トークン制限対策
+    MAX_CHARACTERS = 15000 
     
     for attempt in range(MAX_RETRIES):
         try:
@@ -269,14 +269,24 @@ def analyze_with_gemini(text_to_analyze: str) -> Tuple[str, str, str, bool]:
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     response_schema={"type": "object", "properties": {
-                        "company_info": {"type": "string", "description": "記事の主題企業名と（）内に共同開発企業名を記載した結果"},
-                        "category": {"type": "string", "description": "企業、モデル、技術などの分類結果"},
-                        "sentiment": {"type": "string", "description": "ポジティブ、ニュートラル、ネガティブのいずれか"}
+                        "company_info": {"type": "string", "description": "記事の主題企業名"},
+                        "category": {"type": "string", "description": "カテゴリ分類"},
+                        "sentiment": {"type": "string", "description": "ポジティブ、ニュートラル、ネガティブ"},
+                        "nissan_related": {"type": "string", "description": "日産に関連する言及（なければ『なし』と出力）"},
+                        "nissan_negative": {"type": "string", "description": "日産に対するネガティブな文脈（なければ『なし』と出力）"}
                     }}
                 ),
             )
             analysis = json.loads(response.text.strip())
-            return analysis.get("company_info", "N/A"), analysis.get("category", "N/A"), analysis.get("sentiment", "N/A"), False
+            
+            # Noneが返ってきた場合のガード
+            return {
+                "company_info": analysis.get("company_info", "N/A"),
+                "category": analysis.get("category", "N/A"),
+                "sentiment": analysis.get("sentiment", "N/A"),
+                "nissan_related": analysis.get("nissan_related", "なし"),
+                "nissan_negative": analysis.get("nissan_negative", "なし")
+            }
 
         except ResourceExhausted:
             print("    Gemini API クォータ制限エラー (429)。停止します。")
@@ -285,49 +295,9 @@ def analyze_with_gemini(text_to_analyze: str) -> Tuple[str, str, str, bool]:
             if attempt < MAX_RETRIES - 1:
                 time.sleep(2)
                 continue
-            return "ERROR", "ERROR", "ERROR", False
-    return "ERROR", "ERROR", "ERROR", False
-
-def analyze_nissan_context(text_to_analyze: str) -> Tuple[str, str]:
-    """ 日産以外の記事に対して、日産への言及とネガティブな文脈を抽出する """
-    if not GEMINI_CLIENT:
-        return "N/A", "N/A"
-    
-    prompt_template = load_nissan_prompt()
-    if not prompt_template:
-        return "ERROR(Prompt Missing)", "ERROR"
-
-    MAX_RETRIES = 3
-    MAX_CHARACTERS = 15000
-    
-    for attempt in range(MAX_RETRIES):
-        try:
-            text_for_prompt = text_to_analyze[:MAX_CHARACTERS]
-            prompt = prompt_template.replace("{TEXT_TO_ANALYZE}", text_for_prompt)
+            return default_res
             
-            response = GEMINI_CLIENT.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt,
-                config=types.GenerateContentConfig(
-                    response_mime_type="application/json",
-                    response_schema={"type": "object", "properties": {
-                        "nissan_related": {"type": "string", "description": "記事内の日産に関連する言及の要約または抜粋"},
-                        "nissan_negative": {"type": "string", "description": "日産に対するネガティブな文脈の要約または抜粋"}
-                    }}
-                ),
-            )
-            analysis = json.loads(response.text.strip())
-            return analysis.get("nissan_related", "なし"), analysis.get("nissan_negative", "なし")
-
-        except ResourceExhausted:
-            print("    Gemini API クォータ制限エラー (429)。停止します。")
-            sys.exit(1)
-        except Exception:
-            if attempt < MAX_RETRIES - 1:
-                time.sleep(2)
-                continue
-            return "ERROR", "ERROR"
-    return "ERROR", "ERROR"
+    return default_res
 
 # ====== データ取得関数 (Selenium) ======
 
@@ -381,7 +351,6 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
             if time_tag:
                 date_str = time_tag.text.strip()
             
-            # ソース抽出
             source_text = ""
             source_container = article.find("div", class_=re.compile("sc-n3vj8g-0"))
             if source_container:
@@ -425,34 +394,22 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
 # ====== 詳細取得関数 (ページネーション対応 & ノイズ除去版) ======
 
 def fetch_article_body_and_comments(base_url: str) -> Tuple[str, int, Optional[str]]:
-    """
-    記事の本文（最大10ページ）とコメント数、詳細な日付を取得する。
-    - ページネーション対応: ?page=1〜10 を巡回
-    - ノイズ除去: 「私もそう思う」などのボタンテキストを除外
-    """
     comment_count = -1
     extracted_date_str = None
     
-    # 記事ID抽出
     article_id_match = re.search(r'/articles/([a-f0-9]+)', base_url)
     if not article_id_match:
         return "本文取得不可", -1, None
     
-    # クエリパラメータを除去したベースURLを作成
     base_url_clean = base_url.split('?')[0]
-    
     full_body_parts = []
     
-    # --- ページネーションループ (page=1 to MAX_PAGES) ---
     for page_num in range(1, MAX_PAGES + 1):
         target_url = f"{base_url_clean}?page={page_num}"
-        
-        # リクエスト実行
         response = request_with_retry(target_url)
         if not response:
             break
             
-        # リダイレクト判定
         current_resp_url = response.url
         if page_num > 1:
             if f"page={page_num}" not in current_resp_url:
@@ -460,7 +417,6 @@ def fetch_article_body_and_comments(base_url: str) -> Tuple[str, int, Optional[s
 
         soup = BeautifulSoup(response.text, 'html.parser')
         
-        # --- 初回ページのみ: コメント数と日付の取得 ---
         if page_num == 1:
             cmt_btn = soup.find("button", attrs={"data-cl-params": re.compile(r"cmtmod")}) or \
                       soup.find("a", attrs={"data-cl-params": re.compile(r"cmtmod")})
@@ -476,12 +432,10 @@ def fetch_article_body_and_comments(base_url: str) -> Tuple[str, int, Optional[s
                 if m:
                     extracted_date_str = f"{m.group(1)} {m.group(3)}"
 
-        # --- 本文抽出 (ノイズ除去ロジック強化) ---
         article_content = soup.find('article') or soup.find('div', class_='article_body') or soup.find('div', class_=re.compile(r'article_detail|article_body'))
         
         page_text_blocks = []
         if article_content:
-            # ノイズ要素を事前に除去
             for noise in article_content.find_all(['button', 'a', 'div'], class_=re.compile(r'reaction|rect|module|link|footer|comment')):
                 noise.decompose()
             
@@ -491,6 +445,7 @@ def fetch_article_body_and_comments(base_url: str) -> Tuple[str, int, Optional[s
             
             for p in paragraphs:
                 text = p.get_text(strip=True)
+                # ノイズフィルタ (日本語・ヘブライ語・英語の「ない」系や、ボタンテキストを除外)
                 if text and text not in ["そう思う", "そう思わない", "学びがある", "わかりやすい", "新しい視点", "私もそう思います"]:
                     page_text_blocks.append(text)
         
@@ -499,7 +454,6 @@ def fetch_article_body_and_comments(base_url: str) -> Tuple[str, int, Optional[s
         
         page_body = "\n".join(page_text_blocks)
         
-        # 重複チェック
         if page_num > 1 and len(full_body_parts) > 0:
             prev_content = full_body_parts[0].split('ーーーー\n')[-1]
             if page_body == prev_content:
@@ -507,11 +461,9 @@ def fetch_article_body_and_comments(base_url: str) -> Tuple[str, int, Optional[s
 
         separator = f"\n{page_num}ページ目{'ー'*30}\n"
         full_body_parts.append(separator + page_body)
-        
         time.sleep(1)
 
     final_body_text = "".join(full_body_parts).strip()
-    
     return final_body_text if final_body_text else "本文取得不可", comment_count, extracted_date_str
 
 # ====== スプレッドシート操作関数 ======
@@ -530,10 +482,8 @@ def ensure_source_sheet_headers(sh: gspread.Spreadsheet) -> gspread.Worksheet:
 def write_news_list_to_source(gc: gspread.Client, articles: list[dict]):
     sh = gc.open_by_key(SOURCE_SPREADSHEET_ID)
     worksheet = ensure_source_sheet_headers(sh)
-            
     existing_data = worksheet.get_all_values(value_render_option='UNFORMATTED_VALUE')
     existing_urls = set(str(row[0]) for row in existing_data[1:] if len(row) > 0 and str(row[0]).startswith("http"))
-    
     new_data = [[a['URL'], a['タイトル'], a['投稿日時'], a['ソース']] for a in articles if a['URL'] not in existing_urls]
     
     if new_data:
@@ -552,6 +502,7 @@ def sort_yahoo_sheet(gc: gspread.Client):
     last_row = len(worksheet.col_values(1))
     if last_row <= 1: return
 
+    # 曜日削除やスペース削除のバッチ処理
     try:
         requests = []
         days_of_week = ["月", "火", "水", "木", "金", "土", "日"]
@@ -578,6 +529,7 @@ def sort_yahoo_sheet(gc: gspread.Client):
     except Exception as e:
         print(f" ?? 置換エラー: {e}")
 
+    # 日付フォーマット設定
     try:
         format_requests = [{
             "repeatCell": {
@@ -591,16 +543,18 @@ def sort_yahoo_sheet(gc: gspread.Client):
     except Exception as e:
         print(f" ?? 書式設定エラー: {e}") 
 
+    # ソート処理 (【修正】 'desc' -> 'des')
     try:
         last_col_index = len(YAHOO_SHEET_HEADERS)
         last_col_a1 = gspread_util_col_to_letter(last_col_index)
         sort_range = f'A2:{last_col_a1}{last_row}'
-        worksheet.sort((3, 'desc'), range=sort_range)
+        # 【重要】 gspreadの仕様に合わせて 'des' を使用
+        worksheet.sort((3, 'des'), range=sort_range)
         print(" ? SOURCEシートを投稿日時順に並び替えました。")
     except Exception as e:
         print(f" ?? ソートエラー: {e}")
 
-    # 行高さ設定 (ここで呼び出し)
+    # 行高さ設定
     set_row_height(worksheet, 21)
     print(" ? 全行の高さを21ピクセルに調整しました。")
 
@@ -629,7 +583,6 @@ def fetch_details_and_update_sheet(gc: gspread.Client):
             data_row.extend([''] * (len(YAHOO_SHEET_HEADERS) - len(data_row)))
             
         row_num = idx + 2
-        
         url = str(data_row[0])
         title = str(data_row[1])
         post_date_raw = str(data_row[2])
@@ -701,10 +654,10 @@ def fetch_details_and_update_sheet(gc: gspread.Client):
                     needs_update_to_sheet = True
 
         if needs_update_to_sheet:
-            ws.update(
+            update_sheet_with_retry(
+                ws, 
                 range_name=f'C{row_num}:F{row_num}',
-                values=[[new_post_date, source, new_body, new_comment_count]],
-                value_input_option='USER_ENTERED'
+                values=[[new_post_date, source, new_body, new_comment_count]]
             )
             update_count += 1
             time.sleep(1 + random.random() * 0.5)
@@ -712,7 +665,7 @@ def fetch_details_and_update_sheet(gc: gspread.Client):
     print(f" ? {update_count} 行の詳細情報を更新しました。")
 
 
-# ====== 【改修③対応】Gemini分析の実行 (G〜K列) ======
+# ====== Gemini分析の実行・即時反映 (G〜K列) 1回リクエスト統合版 ======
 
 def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
     sh = gc.open_by_key(SOURCE_SPREADSHEET_ID)
@@ -738,55 +691,62 @@ def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
         title = str(data_row[1])
         body = str(data_row[4])
         
-        current_company = str(data_row[6]) # G列
-        current_category = str(data_row[7])
-        current_sentiment = str(data_row[8])
-        current_nissan_rel = str(data_row[9]) # J列
-        current_nissan_neg = str(data_row[10]) # K列
-
-        needs_basic = not current_company.strip() or not current_category.strip() or not current_sentiment.strip()
-        needs_nissan = not current_nissan_rel.strip() or not current_nissan_neg.strip()
-
-        if not needs_basic and not needs_nissan:
+        # 既存の値
+        current_vals = data_row[6:11] # G, H, I, J, K
+        # 全て埋まっていればスキップ
+        if all(str(v).strip() for v in current_vals):
             continue
             
         if not body.strip() or body == "本文取得不可":
-            ws.update(range_name=f'G{row_num}:K{row_num}', values=[['N/A(No Body)', 'N/A', 'N/A', 'N/A', 'N/A']], value_input_option='USER_ENTERED')
+            update_sheet_with_retry(
+                ws, 
+                range_name=f'G{row_num}:K{row_num}', 
+                values=[['N/A(No Body)', 'N/A', 'N/A', 'N/A', 'N/A']]
+            )
             update_count += 1
             time.sleep(1)
             continue
             
         if not url.strip(): continue
 
-        print(f"  - 行 {row_num} (記事: {title[:20]}...): Gemini分析を実行中...")
+        print(f"  - 行 {row_num} (記事: {title[:20]}...): Gemini分析を実行中 (一括)...")
 
-        final_company = current_company
-        final_category = current_category
-        final_sentiment = current_sentiment
-
-        if needs_basic:
-            final_company, final_category, final_sentiment, _ = analyze_with_gemini(body)
-            time.sleep(1 + random.random() * 0.5)
-
-        final_nissan_rel = current_nissan_rel
-        final_nissan_neg = current_nissan_neg
-
-        if needs_nissan:
-            # 企業名判定 (日産 or NISSANが含まれていれば追加分析スキップ)
-            if "日産" in final_company or "NISSAN" in final_company.upper():
-                final_nissan_rel = "－ (対象が日産)"
-                final_nissan_neg = "－"
-            else:
-                print(f"    -> 対象企業が日産以外 ({final_company}) のため、日産関連文脈を分析中...")
-                final_nissan_rel, final_nissan_neg = analyze_nissan_context(body)
-                time.sleep(1 + random.random() * 0.5)
+        # 1回のリクエストで全項目を取得
+        analysis_result = analyze_article_full(body)
         
-        ws.update(
+        final_company = analysis_result["company_info"]
+        final_category = analysis_result["category"]
+        final_sentiment = analysis_result["sentiment"]
+        final_nissan_rel = analysis_result["nissan_related"]
+        final_nissan_neg = analysis_result["nissan_negative"]
+
+        # 【フィルタリング処理】
+        # 1. 対象企業が日産(またはNISSAN)の場合 -> J,K列は「－ (対象が日産)」
+        if "日産" in final_company or "NISSAN" in final_company.upper():
+            final_nissan_rel = "－ (対象が日産)"
+            final_nissan_neg = "－"
+        
+        # 2. 変な文章の強制上書き
+        # ヘブライ語や「発見されませんでした」系の文章を検知したら「なし」に書き換え
+        # (簡易的なチェック: 日本語のひらがな/カタカナ/漢字以外が多い、または特定のキーワードを含む場合)
+        for check_text in [final_nissan_rel, final_nissan_neg]:
+            if any(keyword in check_text for keyword in ["not mentioned", "no mention", "発見されませんでした", "言及はありません", "記載されていません"]):
+                 if check_text == final_nissan_rel: final_nissan_rel = "なし"
+                 if check_text == final_nissan_neg: final_nissan_neg = "なし"
+            
+            # ヘブライ語等の判定は難しいので、「なし」とAIが返してくることをプロンプトで強く期待するが、
+            # もし英語の "None" が返ってきたら "なし" に直す
+            if check_text.lower() == "none":
+                 if check_text == final_nissan_rel: final_nissan_rel = "なし"
+                 if check_text == final_nissan_neg: final_nissan_neg = "なし"
+
+        update_sheet_with_retry(
+            ws,
             range_name=f'G{row_num}:K{row_num}',
-            values=[[final_company, final_category, final_sentiment, final_nissan_rel, final_nissan_neg]],
-            value_input_option='USER_ENTERED'
+            values=[[final_company, final_category, final_sentiment, final_nissan_rel, final_nissan_neg]]
         )
         update_count += 1
+        time.sleep(1 + random.random() * 0.5)
 
     print(f" ? Gemini分析を {update_count} 行について実行しました。")
 
@@ -811,14 +771,14 @@ def main():
         write_news_list_to_source(gc, yahoo_news_articles)
         time.sleep(2)
 
-    # ステップ② 本文・コメント数の取得 (ページネーション対応済)
+    # ステップ② 本文・コメント数の取得
     fetch_details_and_update_sheet(gc)
 
     # ステップ③ ソートと整形
     print("\n=====   ステップ③ 記事データのソートと整形 =====")
     sort_yahoo_sheet(gc)
     
-    # ステップ④ Gemini分析 (基本 + 日産追加)
+    # ステップ④ Gemini分析 (一括)
     analyze_with_gemini_and_update_sheet(gc)
     
     print("\n--- 統合スクリプト完了 ---")
