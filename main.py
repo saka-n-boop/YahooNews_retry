@@ -728,9 +728,9 @@ def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
 
         # 【フィルタリング処理】
         # 1. 対象企業が日産(またはNISSAN)の場合 -> J,K列は「－ (対象が日産)」
-        if "日産" in final_company or "NISSAN" in final_company.upper():
-            final_nissan_rel = "－ (対象が日産)"
-            final_nissan_neg = "－"
+        #if "日産" in final_company or "NISSAN" in final_company.upper():
+        #    final_nissan_rel = "－ (対象が日産)"
+        #    final_nissan_neg = "－"
         
         # 2. 変な文章(ハルシネーション)の強制排除
         for check_text in [final_nissan_rel, final_nissan_neg]:
