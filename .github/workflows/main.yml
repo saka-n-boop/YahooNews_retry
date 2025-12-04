@@ -6,6 +6,10 @@ on:
   schedule:
     - cron: '45 05 * * *'
 
+concurrency:
+  group: yahoo-news-scraper-and-gemini-analyzer
+  cancel-in-progress: false
+
 jobs:
   run-script:
     runs-on: ubuntu-latest
@@ -23,8 +27,6 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          
-          # 【重要】プログラムに合わせて最新のSDKを指定 (google-genai)
           pip install --no-cache-dir --upgrade google-genai
 
       - name: Run Python script
