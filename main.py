@@ -57,7 +57,11 @@ ALL_PROMPT_FILES = [
     "prompt_nissan_sentiment.txt"
 ]
 
-# Gemini API Keyの読み込み
+# APIリクエスト制御用のグローバル変数
+GEMINI_REQUEST_COUNT = 0
+USING_SECOND_KEY = False
+
+# Gemini API Keyの初期読み込み (メインキー)
 try:
     api_key = os.environ.get("GOOGLE_API_KEY")
     if not api_key:
@@ -240,11 +244,13 @@ def update_sheet_with_retry(ws, range_name, values, max_retries=3):
     print(f"  !! 最終リトライ失敗: {range_name} の更新をスキップします。")
 
 
-# ====== Gemini 分析関数 (統合版) ======
+# ====== Gemini 分析関数 (統合版・APIキー切り替え機能付き) ======
 def analyze_article_full(text_to_analyze: str) -> Dict[str, str]:
     """ 
     記事を分析し、企業情報、カテゴリ、ポジネガ、日産関連、日産ネガの5項目を一度に取得する 
     """
+    global GEMINI_CLIENT, GEMINI_REQUEST_COUNT, USING_SECOND_KEY
+
     default_res = {
         "company_info": "N/A", "category": "N/A", "sentiment": "N/A",
         "nissan_related": "なし", "nissan_negative": "なし"
@@ -252,6 +258,22 @@ def analyze_article_full(text_to_analyze: str) -> Dict[str, str]:
 
     if not GEMINI_CLIENT or not text_to_analyze.strip():
         return default_res
+
+    # --- APIキー切り替えロジック (240回超過時) ---
+    if GEMINI_REQUEST_COUNT >= 240 and not USING_SECOND_KEY:
+        print("  ! APIリクエスト回数が240回に達しました。GOOGLE_API_KEY_2 に切り替えます。")
+        try:
+            api_key_2 = os.environ.get("GOOGLE_API_KEY_2")
+            if api_key_2:
+                GEMINI_CLIENT = genai.Client(api_key=api_key_2)
+                USING_SECOND_KEY = True
+                # カウントはリセットせず継続、またはリセットでも良いがフラグ制御しているのでこのブロックには入らなくなる
+            else:
+                print("  ! 警告: GOOGLE_API_KEY_2 が設定されていません。メインキーで続行します。")
+                USING_SECOND_KEY = True # エラーログ連発防止
+        except Exception as e:
+            print(f"  ! キー切り替え中にエラー発生: {e}。メインキーで続行します。")
+            USING_SECOND_KEY = True
 
     prompt_template = load_merged_prompt()
     if not prompt_template:
@@ -262,6 +284,9 @@ def analyze_article_full(text_to_analyze: str) -> Dict[str, str]:
     
     for attempt in range(MAX_RETRIES):
         try:
+            # APIコール回数をカウントアップ
+            GEMINI_REQUEST_COUNT += 1
+
             text_for_prompt = text_to_analyze[:MAX_CHARACTERS]
             prompt = prompt_template.replace("{TEXT_TO_ANALYZE}", text_for_prompt)
             
