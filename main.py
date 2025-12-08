@@ -291,7 +291,7 @@ def analyze_article_full(text_to_analyze: str) -> Dict[str, str]:
             
             # JSONスキーマで出力項目を強制する
             response = GEMINI_CLIENT.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.0-flash-001',
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
