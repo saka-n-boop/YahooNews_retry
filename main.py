@@ -703,7 +703,7 @@ def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
     data_rows = all_values[1:]
     update_count = 0
     
-    print("\n=====   ステップ④ Gemini分析の実行・即時反映 (G?K列) =====")
+    print("\n=====   ステップ④ Gemini分析の実行・即時反映 (G-K列) =====")
 
     for idx, data_row in enumerate(data_rows):
         if len(data_row) < len(YAHOO_SHEET_HEADERS):
