@@ -57,28 +57,32 @@ ALL_PROMPT_FILES = [
     "prompt_nissan_sentiment.txt"
 ]
 
-# APIリクエスト制御用のグローバル変数
-GEMINI_REQUEST_COUNT = 0
-USING_SECOND_KEY = False
+# --- APIキー管理システム (改修部分) ---
+API_KEY_LIST = []
+for i in range(1, 6): # 1から5まで
+    key = os.environ.get(f"GOOGLE_API_KEY_{i}")
+    if key:
+        API_KEY_LIST.append(key)
 
-# Gemini API Keyの初期読み込み (メインキー)
-try:
-    api_key = os.environ.get("GOOGLE_API_KEY")
-    if not api_key:
-        print("警告: 環境変数 'GOOGLE_API_KEY' が設定されていません。Gemini分析はスキップされます。")
-        GEMINI_CLIENT = None
-    else:
-        GEMINI_CLIENT = genai.Client(api_key=api_key)
-except Exception as e:
-    print(f"警告: Geminiクライアントの初期化に失敗しました。Gemini分析はスキップされます。エラー: {e}")
+# フォールバック: 旧変数名 GOOGLE_API_KEY も確認
+if not API_KEY_LIST and os.environ.get("GOOGLE_API_KEY"):
+    API_KEY_LIST.append(os.environ.get("GOOGLE_API_KEY"))
+
+if not API_KEY_LIST:
+    print("警告: APIキーが一つも設定されていません (GOOGLE_API_KEY_1 ~ 5)。")
     GEMINI_CLIENT = None
+else:
+    # 初期化
+    CURRENT_KEY_INDEX = 0
+    REQUEST_COUNT_FOR_CURRENT_KEY = 0
+    GEMINI_CLIENT = genai.Client(api_key=API_KEY_LIST[0])
+    print(f"初期化完了: {len(API_KEY_LIST)} 個のAPIキーをロードしました。Key 1 から開始します。")
 
 GEMINI_PROMPT_TEMPLATE = None
 
 # ====== ヘルパー関数群 ======
 
 def gspread_util_col_to_letter(col_index: int) -> str:
-    """ gspreadの古いバージョン対策: 列番号をアルファベットに変換 """
     if col_index < 1:
         raise ValueError("Column index must be 1 or greater")
     a1_notation = gspread.utils.rowcol_to_a1(1, col_index)
@@ -136,8 +140,6 @@ def load_keywords(filename: str) -> List[str]:
         file_path = os.path.join(script_dir, filename)
         with open(file_path, 'r', encoding='utf-8') as f:
             keywords = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-        if not keywords:
-            raise ValueError("キーワードファイルに有効なキーワードが含まれていません。")
         return keywords
     except FileNotFoundError:
         print(f"致命的エラー: キーワードファイル '{filename}' が見つかりません。")
@@ -155,14 +157,11 @@ def load_merged_prompt() -> str:
     combined_instructions = []
     try:
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # 1つ目のファイルをRoleとして読み込み
         role_file = ALL_PROMPT_FILES[0]
         file_path = os.path.join(script_dir, role_file)
         with open(file_path, 'r', encoding='utf-8') as f:
             role_instruction = f.read().strip()
         
-        # 残りのファイルを順番に結合
         for filename in ALL_PROMPT_FILES[1:]:
             file_path = os.path.join(script_dir, filename)
             with open(file_path, 'r', encoding='utf-8') as f:
@@ -171,11 +170,10 @@ def load_merged_prompt() -> str:
                 combined_instructions.append(content)
                         
         base_prompt = role_instruction + "\n" + "\n".join(combined_instructions)
-        
-        # 【重要】ハルシネーション対策の共通指示を追加
         base_prompt += "\n\n【重要】\n該当する情報（特に日産への言及やネガティブ要素）がない場合は、説明文や翻訳を一切書かず、必ず単語で『なし』とだけ出力してください。"
         
-        base_prompt += "\n\n記事本文:\n{TEXT_TO_ANALYZE}"
+        # バッチ処理用のプレースホルダーに変更
+        base_prompt += "\n\n【分析対象記事リスト】:\n{TEXT_TO_ANALYZE}"
 
         GEMINI_PROMPT_TEMPLATE = base_prompt
         print(" プロンプトファイルを統合してロードしました。")
@@ -201,10 +199,8 @@ def request_with_retry(url: str, max_retries: int = 3) -> Optional[requests.Resp
     return None
 
 def set_row_height(ws: gspread.Worksheet, row_height_pixels: int):
-    """ 指定したシートの全行の高さを設定する関数 """
     try:
-        requests = []
-        requests.append({
+        requests = [{
            "updateDimensionProperties": {
                  "range": {
                      "sheetId": ws.id,
@@ -217,23 +213,21 @@ def set_row_height(ws: gspread.Worksheet, row_height_pixels: int):
                  },
                  "fields": "pixelSize"
             }
-        })
+        }]
         ws.spreadsheet.batch_update({"requests": requests})
     except Exception as e:
         print(f" ?? 行高設定エラー: {e}")
 
 def update_sheet_with_retry(ws, range_name, values, max_retries=3):
-    """ スプレッドシート更新のリトライラッパー (502/503エラー対策) """
     for attempt in range(max_retries):
         try:
             ws.update(range_name=range_name, values=values, value_input_option='USER_ENTERED')
             return
         except gspread.exceptions.APIError as e:
             error_str = str(e)
-            # 500番台のエラーは待機してリトライ
             if any(code in error_str for code in ['500', '502', '503']):
                 wait_seconds = 30 * (attempt + 1)
-                print(f"  ?? Google API Server Error (502/503). {wait_seconds}秒待機してリトライします... ({attempt+1}/{max_retries})")
+                print(f"  ?? Google API Server Error (502/503). {wait_seconds}秒待機してリトライします...")
                 time.sleep(wait_seconds)
             else:
                 raise e
@@ -243,90 +237,109 @@ def update_sheet_with_retry(ws, range_name, values, max_retries=3):
             time.sleep(wait_seconds)
     print(f"  !! 最終リトライ失敗: {range_name} の更新をスキップします。")
 
+# --- 新規追加: APIキーローテーション関数 ---
+def rotate_api_key():
+    global GEMINI_CLIENT, CURRENT_KEY_INDEX, REQUEST_COUNT_FOR_CURRENT_KEY
+    
+    # 次のキーへインデックスを進める
+    CURRENT_KEY_INDEX += 1
+    
+    if CURRENT_KEY_INDEX >= len(API_KEY_LIST):
+        print("  !! 全てのAPIキーの制限に達しました。処理を中断します。")
+        return False # 全キー使用済み
+    
+    new_key = API_KEY_LIST[CURRENT_KEY_INDEX]
+    GEMINI_CLIENT = genai.Client(api_key=new_key)
+    REQUEST_COUNT_FOR_CURRENT_KEY = 0
+    print(f"  -> APIキーを切り替えました (Key {CURRENT_KEY_INDEX + 1}/{len(API_KEY_LIST)})")
+    return True
 
-# ====== Gemini 分析関数 (統合版・APIキー切り替え機能付き) ======
-def analyze_article_full(text_to_analyze: str) -> Dict[str, str]:
+# ====== Gemini 分析関数 (5件バッチ処理版) ======
+def analyze_article_batch(texts: List[str]) -> List[Dict[str, str]]:
     """ 
-    記事を分析し、企業情報、カテゴリ、ポジネガ、日産関連、日産ネガの5項目を一度に取得する 
+    最大5件の記事テキストを受け取り、リスト形式の分析結果を返す
     """
-    global GEMINI_CLIENT, GEMINI_REQUEST_COUNT, USING_SECOND_KEY
+    global GEMINI_CLIENT, REQUEST_COUNT_FOR_CURRENT_KEY
+    
+    # デフォルトの空結果（失敗時用）
+    default_res = [{"company_info": "N/A", "category": "N/A", "sentiment": "N/A", "nissan_related": "なし", "nissan_negative": "なし"} for _ in texts]
 
-    default_res = {
-        "company_info": "N/A", "category": "N/A", "sentiment": "N/A",
-        "nissan_related": "なし", "nissan_negative": "なし"
-    }
-
-    if not GEMINI_CLIENT or not text_to_analyze.strip():
+    if not GEMINI_CLIENT or not texts:
         return default_res
 
-    # --- APIキー切り替えロジック (240回超過時) ---
-    if GEMINI_REQUEST_COUNT >= 240 and not USING_SECOND_KEY:
-        print("  ! APIリクエスト回数が240回に達しました。GOOGLE_API_KEY_2 に切り替えます。")
-        try:
-            api_key_2 = os.environ.get("GOOGLE_API_KEY_2")
-            if api_key_2:
-                GEMINI_CLIENT = genai.Client(api_key=api_key_2)
-                USING_SECOND_KEY = True
-            else:
-                print("  ! 警告: GOOGLE_API_KEY_2 が設定されていません。メインキーで続行します。")
-                USING_SECOND_KEY = True # エラーログ連発防止
-        except Exception as e:
-            print(f"  ! キー切り替え中にエラー発生: {e}。メインキーで続行します。")
-            USING_SECOND_KEY = True
+    # --- RPD制限 (20回) のチェックとローテーション ---
+    if REQUEST_COUNT_FOR_CURRENT_KEY >= 20:
+        if not rotate_api_key():
+            sys.exit(1) # 全キー消費時は終了
 
     prompt_template = load_merged_prompt()
     if not prompt_template:
         return default_res
 
+    # 入力テキストの結合 (Article 1, Article 2... 形式)
+    combined_text = ""
+    for i, txt in enumerate(texts):
+        combined_text += f"\n【記事 {i+1}】\n{txt[:3000]}\n" # 文字数制限対策で各3000文字にカット
+
     MAX_RETRIES = 3
-    MAX_CHARACTERS = 15000 # トークン制限対策
     
     for attempt in range(MAX_RETRIES):
         try:
             # APIコール回数をカウントアップ
-            GEMINI_REQUEST_COUNT += 1
+            REQUEST_COUNT_FOR_CURRENT_KEY += 1
 
-            text_for_prompt = text_to_analyze[:MAX_CHARACTERS]
-            prompt = prompt_template.replace("{TEXT_TO_ANALYZE}", text_for_prompt)
+            prompt = prompt_template.replace("{TEXT_TO_ANALYZE}", combined_text)
+            prompt += f"\n\n※上記の{len(texts)}つの記事それぞれについて分析し、必ず{len(texts)}個のオブジェクトを含むJSONリスト形式で出力してください。"
             
-            # JSONスキーマで出力項目を強制する
+            # JSONスキーマで「オブジェクトの配列」を強制する
             response = GEMINI_CLIENT.models.generate_content(
-                model='gemini-2.0-flash',
+                model='gemini-2.5-flash', # 指定された2.5を使用
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
-                    response_schema={"type": "object", "properties": {
-                        "company_info": {"type": "string", "description": "記事の主題企業名"},
-                        "category": {"type": "string", "description": "カテゴリ分類"},
-                        "sentiment": {"type": "string", "description": "ポジティブ、ニュートラル、ネガティブ"},
-                        "nissan_related": {"type": "string", "description": "日産に関連する言及（なければ『なし』）"},
-                        "nissan_negative": {"type": "string", "description": "日産に対するネガティブな文脈（なければ『なし』）"}
-                    }}
+                    response_schema={
+                        "type": "array", # 配列として受け取る
+                        "items": {
+                            "type": "object", 
+                            "properties": {
+                                "company_info": {"type": "string"},
+                                "category": {"type": "string"},
+                                "sentiment": {"type": "string"},
+                                "nissan_related": {"type": "string"},
+                                "nissan_negative": {"type": "string"}
+                            }
+                        }
+                    }
                 ),
             )
-            analysis = json.loads(response.text.strip())
             
-            # Noneが返ってきた場合のガード
-            return {
-                "company_info": analysis.get("company_info", "N/A"),
-                "category": analysis.get("category", "N/A"),
-                "sentiment": analysis.get("sentiment", "N/A"),
-                "nissan_related": analysis.get("nissan_related", "なし"),
-                "nissan_negative": analysis.get("nissan_negative", "なし")
-            }
+            analysis_list = json.loads(response.text.strip())
+            
+            # 結果の数が合わない場合の補正
+            if len(analysis_list) < len(texts):
+                analysis_list.extend([default_res[0]] * (len(texts) - len(analysis_list)))
+            
+            return analysis_list[:len(texts)]
 
         except ResourceExhausted:
-            print("    Gemini API クォータ制限エラー (429)。停止します。")
-            sys.exit(1)
+            print(f"    !! Gemini API 制限 (429) - Key {CURRENT_KEY_INDEX + 1}")
+            # エラーが出たら即座に次のキーへ
+            if rotate_api_key():
+                continue # リトライ
+            else:
+                sys.exit(1)
+
         except Exception as e:
+            # 429以外のエラー
+            if "429" in str(e):
+                if rotate_api_key(): continue
+                else: sys.exit(1)
+            
             if attempt < MAX_RETRIES - 1:
                 time.sleep(2)
                 continue
             else:
-                # 【ここを追加】最終的に失敗した理由をログに出す
-                print(f"    ! Gemini分析最終エラー: {e}")
-                # もしレスポンス内容が見れるなら出すとセーフティフィルタかわかる
-                # print(f"    ! レスポンス内容: {response.text if 'response' in locals() else 'None'}")
+                print(f"    ! バッチ分析エラー: {e}")
                 return default_res
             
     return default_res
@@ -383,7 +396,6 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
             if time_tag:
                 date_str = time_tag.text.strip()
             
-            # ソース抽出
             source_text = ""
             source_container = article.find("div", class_=re.compile("sc-n3vj8g-0"))
             if source_container:
@@ -693,7 +705,7 @@ def fetch_details_and_update_sheet(gc: gspread.Client):
     print(f" ? {update_count} 行の詳細情報を更新しました。")
 
 
-# ====== Gemini分析の実行・即時反映 (G〜K列) 1回リクエスト統合版 ======
+# ====== Gemini分析の実行・即時反映 (バッチ版) ======
 
 def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
     sh = gc.open_by_key(SOURCE_SPREADSHEET_ID)
@@ -706,73 +718,83 @@ def analyze_with_gemini_and_update_sheet(gc: gspread.Client):
     if len(all_values) <= 1: return
         
     data_rows = all_values[1:]
-    update_count = 0
     
-    print("\n=====   ステップ④ Gemini分析の実行・即時反映 (G〜K列) =====")
+    print("\n=====   ステップ④ Gemini分析の実行・即時反映 (一括5件) =====")
 
-    for idx, data_row in enumerate(data_rows):
-        if len(data_row) < len(YAHOO_SHEET_HEADERS):
-            data_row.extend([''] * (len(YAHOO_SHEET_HEADERS) - len(data_row)))
-            
+    # 未分析の行を収集
+    target_rows = []
+    for idx, row in enumerate(data_rows):
         row_num = idx + 2
-        url = str(data_row[0])
-        title = str(data_row[1])
-        body = str(data_row[4])
+        # 行データ補完
+        if len(row) < len(YAHOO_SHEET_HEADERS):
+            row.extend([''] * (len(YAHOO_SHEET_HEADERS) - len(row)))
+            
+        body = str(row[4])
+        url = str(row[0])
+        current_vals = row[6:11] # G~K
         
-        # 既存の値 (G, H, I, J, K)
-        current_vals = data_row[6:11] 
-        # 全て埋まっていればスキップ
+        # 既に埋まっていればスキップ
         if all(str(v).strip() for v in current_vals):
             continue
             
-        if not body.strip() or body == "本文取得不可":
-            update_sheet_with_retry(
-                ws, 
-                range_name=f'G{row_num}:K{row_num}', 
-                values=[['N/A(No Body)', 'N/A', 'N/A', 'N/A', 'N/A']]
-            )
-            update_count += 1
-            time.sleep(1)
+        # 本文なし/URLなしは除外（N/A埋めは別途必要だが今回はスキップ）
+        if not body.strip() or body == "本文取得不可" or not url.strip():
+            # 本文がない場合は即N/Aで埋めておく
+            if not body.strip() or body == "本文取得不可":
+                update_sheet_with_retry(ws, f'G{row_num}:K{row_num}', [['N/A(No Body)', 'N/A', 'N/A', 'N/A', 'N/A']])
             continue
             
-        if not url.strip(): continue
+        target_rows.append({"row_num": row_num, "body": body, "title": str(row[1])})
 
-        print(f"  - 行 {row_num} (記事: {title[:20]}...): Gemini分析を実行中 (一括)...")
+    if not target_rows:
+        print("  - 新規分析対象はありません。")
+        return
 
-        # 1回のリクエストで全項目を取得
-        analysis_result = analyze_article_full(body)
+    # バッチ処理 (5件ずつ)
+    BATCH_SIZE = 5
+    for i in range(0, len(target_rows), BATCH_SIZE):
+        batch = target_rows[i : i + BATCH_SIZE]
+        texts = [item["body"] for item in batch]
+        row_nums = [item["row_num"] for item in batch]
         
-        final_company = analysis_result["company_info"]
-        final_category = analysis_result["category"]
-        final_sentiment = analysis_result["sentiment"]
-        final_nissan_rel = analysis_result["nissan_related"]
-        final_nissan_neg = analysis_result["nissan_negative"]
-
-        # 【フィルタリング処理】
-        # 1. 対象企業が日産(またはNISSAN)の場合 -> J,K列は「－ (対象が日産)」
-        #if "日産" in final_company or "NISSAN" in final_company.upper():
-        #    final_nissan_rel = "－ (対象が日産)"
-        #    final_nissan_neg = "－"
+        print(f"  - バッチ分析中 (行 {row_nums[0]} ~ {row_nums[-1]}) ...")
         
-        # 2. 変な文章(ハルシネーション)の強制排除
-        for check_text in [final_nissan_rel, final_nissan_neg]:
-            if any(keyword in check_text for keyword in ["not mentioned", "no mention", "発見されませんでした", "言及はありません", "記載されていません"]):
-                 if check_text == final_nissan_rel: final_nissan_rel = "なし"
-                 if check_text == final_nissan_neg: final_nissan_neg = "なし"
+        # Gemini呼び出し
+        results = analyze_article_batch(texts)
+        
+        # 結果の書き込み
+        for j, res in enumerate(results):
+            r_num = row_nums[j]
             
-            if check_text.lower() == "none":
-                 if check_text == final_nissan_rel: final_nissan_rel = "なし"
-                 if check_text == final_nissan_neg: final_nissan_neg = "なし"
+            # フィルタリング
+            final_nissan_rel = res["nissan_related"]
+            final_nissan_neg = res["nissan_negative"]
+            
+            # ハルシネーション除去
+            for check_text in [final_nissan_rel, final_nissan_neg]:
+                if any(k in check_text for k in ["not mentioned", "no mention", "発見されませんでした", "言及はありません"]):
+                     if check_text == final_nissan_rel: final_nissan_rel = "なし"
+                     if check_text == final_nissan_neg: final_nissan_neg = "なし"
+                if check_text.lower() == "none":
+                     if check_text == final_nissan_rel: final_nissan_rel = "なし"
+                     if check_text == final_nissan_neg: final_nissan_neg = "なし"
 
-        update_sheet_with_retry(
-            ws,
-            range_name=f'G{row_num}:K{row_num}',
-            values=[[final_company, final_category, final_sentiment, final_nissan_rel, final_nissan_neg]]
-        )
-        update_count += 1
-        time.sleep(1 + random.random() * 0.5)
+            vals = [[
+                res["company_info"],
+                res["category"],
+                res["sentiment"],
+                final_nissan_rel,
+                final_nissan_neg
+            ]]
+            
+            update_sheet_with_retry(ws, f'G{r_num}:K{r_num}', vals)
+        
+        # RPM制限 (1分に5回まで -> 12秒に1回) 対策
+        # 念のため15秒待機
+        print("    (RPM制限対策: 15秒待機...)")
+        time.sleep(15)
 
-    print(f" ? Gemini分析を {update_count} 行について実行しました。")
+    print(f" ? Gemini分析完了。")
 
 
 def main():
