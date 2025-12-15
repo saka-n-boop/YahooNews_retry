@@ -83,8 +83,7 @@ def fetch_comments_from_url(article_url: str) -> list[str]:
                 comment_body = max([p.get_text(strip=True) for p in p_tags], key=len)
             
             if comment_body:
-                # --- 【追加】ノイズ除去フィルタ ---
-                # 管理用テキストなどが含まれていたらスキップする
+                # ノイズ除去フィルタ
                 ignore_phrases = [
                     "このコメントを削除しますか",
                     "コメントを削除しました",
@@ -94,7 +93,6 @@ def fetch_comments_from_url(article_url: str) -> list[str]:
                 ]
                 if any(phrase in comment_body for phrase in ignore_phrases):
                     continue
-                # ----------------------------------
 
                 full_text = f"【投稿者: {user_name}】\n{comment_body}"
                 
@@ -168,7 +166,7 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         post_date = row[2]
         source = row[3]
         comment_count_str = row[5]
-        target_company = row[6]
+        target_company = row[6] # G列
         # sentiment = row[8]
         nissan_neg_text = row[10] # K列
         
@@ -176,18 +174,20 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         if url in existing_urls:
             continue
 
-        # --- 条件判定 ---
+        # --- 条件判定 (改修版) ---
         is_target = False
         
-        # 条件①: コメント数が100件以上
-        try:
-            cnt = int(re.sub(r'\D', '', comment_count_str))
-            if cnt >= 100:
-                is_target = True
-        except:
-            pass
+        # 条件①: 対象企業が「日産」で始まり、かつコメント数が100件以上
+        if target_company.startswith("日産"):
+            try:
+                cnt = int(re.sub(r'\D', '', comment_count_str))
+                if cnt >= 100:
+                    is_target = True
+            except:
+                pass
             
         # 条件②: 日産ネガ文に記載がある ("なし" 以外)
+        # ※条件①を満たしていない場合のみチェック
         if not is_target:
             val = str(nissan_neg_text).strip()
             if val and val not in ["なし", "N/A", "N/A(No Body)", "-"]:
