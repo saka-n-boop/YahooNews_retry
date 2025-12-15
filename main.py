@@ -811,21 +811,21 @@ def main():
         sys.exit(1)
     
     # ステップ① ニュース取得
-    for current_keyword in keywords:
-        print(f"\n=====   ステップ① ニュースリスト取得: {current_keyword} =====")
-        yahoo_news_articles = get_yahoo_news_with_selenium(current_keyword)
-        write_news_list_to_source(gc, yahoo_news_articles)
-        time.sleep(2)
+#    for current_keyword in keywords:
+#        print(f"\n=====   ステップ① ニュースリスト取得: {current_keyword} =====")
+#        yahoo_news_articles = get_yahoo_news_with_selenium(current_keyword)
+#        write_news_list_to_source(gc, yahoo_news_articles)
+#        time.sleep(2)
 
     # ステップ② 本文・コメント数の取得
-    fetch_details_and_update_sheet(gc)
+#    fetch_details_and_update_sheet(gc)
 
     # ステップ③ ソートと整形
-    print("\n=====   ステップ③ 記事データのソートと整形 =====")
-    sort_yahoo_sheet(gc)
+#    print("\n=====   ステップ③ 記事データのソートと整形 =====")
+#    sort_yahoo_sheet(gc)
     
     # ステップ④ Gemini分析 (一括)
-    analyze_with_gemini_and_update_sheet(gc)
+#    analyze_with_gemini_and_update_sheet(gc)
     
     # ステップ⑤ コメント収集
     print("\n===== ⑤ コメント取得開始 =====")
