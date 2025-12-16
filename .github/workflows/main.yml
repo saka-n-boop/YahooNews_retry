@@ -38,4 +38,7 @@ jobs:
           GOOGLE_API_KEY_4: ${{ secrets.GOOGLE_API_KEY_4 }}
           GOOGLE_API_KEY_5: ${{ secrets.GOOGLE_API_KEY_5 }}
           SPREADSHEET_KEY: ${{ secrets.SPREADSHEET_KEY }}
+
+          PYTHONUNBUFFERED: '1'
+
         run: python main.py
