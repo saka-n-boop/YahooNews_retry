@@ -96,7 +96,7 @@ def get_current_gemini_client() -> Optional[genai.Client]:
     api_key = AVAILABLE_API_KEYS[CURRENT_KEY_INDEX]
     return genai.Client(
         api_key=api_key, 
-        http_options={'timeout': 600000}
+        http_options={'timeout': 6000000}
     )
 def rotate_api_key(reason="limit_reached"):
     """ APIキーを次のものに切り替える """
@@ -255,7 +255,7 @@ def call_gemini_api(prompt: str, is_batch: bool = False, schema: dict = None) ->
     for attempt in range(MAX_RETRIES):
         try:
             response = client.models.generate_content(
-                model='gemini-1.5-flash', # または 'gemini-2.0-flash-exp'
+                model='gemini-2.5-flash', # または 'gemini-2.0-flash-exp'
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
