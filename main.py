@@ -241,40 +241,28 @@ def call_gemini_api(prompt: str, is_batch: bool = False, schema: dict = None) ->
     client = get_current_gemini_client()
     if not client: return None
 
-    MAX_RETRIES = 2 
+    # サーバー混雑時はリトライしたいので、回数を少し多めにしておくと安心です
+    MAX_RETRIES = 5 
     
-    # 【修正】無料枠用のセーフティ設定定義
-    # 無料枠では BLOCK_NONE が使えないため BLOCK_ONLY_HIGH にします
+    # 無料枠用のセーフティ設定
     safety_settings_free = [
-        types.SafetySetting(
-            category="HARM_CATEGORY_HATE_SPEECH",
-            threshold="BLOCK_ONLY_HIGH"
-        ),
-        types.SafetySetting(
-            category="HARM_CATEGORY_DANGEROUS_CONTENT",
-            threshold="BLOCK_ONLY_HIGH"
-        ),
-        types.SafetySetting(
-            category="HARM_CATEGORY_SEXUALLY_EXPLICIT",
-            threshold="BLOCK_ONLY_HIGH"
-        ),
-        types.SafetySetting(
-            category="HARM_CATEGORY_HARASSMENT",
-            threshold="BLOCK_ONLY_HIGH"
-        )
+        types.SafetySetting(category="HARM_CATEGORY_HATE_SPEECH", threshold="BLOCK_ONLY_HIGH"),
+        types.SafetySetting(category="HARM_CATEGORY_DANGEROUS_CONTENT", threshold="BLOCK_ONLY_HIGH"),
+        types.SafetySetting(category="HARM_CATEGORY_SEXUALLY_EXPLICIT", threshold="BLOCK_ONLY_HIGH"),
+        types.SafetySetting(category="HARM_CATEGORY_HARASSMENT", threshold="BLOCK_ONLY_HIGH")
     ]
 
     for attempt in range(MAX_RETRIES):
         try:
             response = client.models.generate_content(
-                model='gemini-2.5-flash', 
+                model='gemini-1.5-flash', # または 'gemini-2.0-flash-exp'
                 contents=prompt,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     response_schema=schema,
-                    # ここで変数を適用
                     safety_settings=safety_settings_free
                 ),
+                # クライアント側で一括設定したため、個別の timeout=... は不要です
             )
             return json.loads(response.text.strip())
 
@@ -282,23 +270,38 @@ def call_gemini_api(prompt: str, is_batch: bool = False, schema: dict = None) ->
             print("    !! 429 Error (Quota Exceeded). Rotating key...")
             rotate_api_key(reason="429_error")
             client = get_current_gemini_client()
+            time.sleep(5) # ローテーション後も一息おく
             continue
         
-        # 無料枠でBLOCK_NONEを使ってしまった場合の400エラー対策
         except Exception as e:
-            if "restricted HarmBlockThreshold" in str(e):
+            err_msg = str(e)
+
+            # 1. 無料枠のセーフティ設定ミス（これはリトライしても直らないので終了）
+            if "restricted HarmBlockThreshold" in err_msg:
                 print("    !! Config Error: BLOCK_NONE is not allowed on Free Tier.")
                 return None
 
-            if "429" in str(e) or "RESOURCE_EXHAUSTED" in str(e):
-                print("    !! 429 Error detected in message. Rotating key...")
+            # 2. リソース不足 (429) -> キーを替えてリトライ
+            if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg:
+                print("    !! 429 Error detected. Rotating key...")
                 rotate_api_key(reason="429_in_msg")
                 client = get_current_gemini_client()
+                time.sleep(10)
                 continue
             
+            # 3. 【追加】サーバー混雑 (503 Overloaded) -> 少し待ってリトライ
+            if "503" in err_msg or "overloaded" in err_msg or "UNAVAILABLE" in err_msg:
+                wait_sec = 10 * (attempt + 1) # 回数ごとに待ち時間を増やす (20秒, 40秒...)
+                print(f"    !! Server Overloaded (503). Retrying in {wait_sec}s... ({attempt+1}/{MAX_RETRIES})")
+                time.sleep(wait_sec)
+                # continueすることで、forループの最初に戻り再実行される
+                continue
+
+            # その他の不明なエラーはログを出して終了
             print(f"    ! API Error: {e}")
             return None 
 
+    print("    !! Max retries reached. Giving up.")
     return None
 
 # ====== 記事分析用関数 ======
