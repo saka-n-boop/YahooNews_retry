@@ -644,13 +644,12 @@ def main():
         if new: ws.append_rows(new, value_input_option='USER_ENTERED')
         time.sleep(2)
 
-    print("\n===== ② 詳細取得 =====")
-    fetch_details_and_update_sheet(gc)
+    #print("\n===== ② 詳細取得 =====")
+    #fetch_details_and_update_sheet(gc)
     print("\n===== ③ ソート・整形 =====")
     sort_yahoo_sheet(gc)
-    print("\n===== ④ Gemini分析 =====")
-    analyze_with_gemini_and_update_sheet(gc)
-    
+    #print("\n===== ④ Gemini分析 =====")
+    #analyze_with_gemini_and_update_sheet(gc)
     print("\n===== ⑤ コメント収集・要約 =====")
     comment_scraper.run_comment_collection(gc, SHARED_SPREADSHEET_ID, SOURCE_SHEET_NAME, analyze_comment_summary)
     
