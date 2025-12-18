@@ -414,6 +414,33 @@ def get_yahoo_news_with_selenium(keyword: str) -> list[dict]:
     try: WebDriverWait(driver, 20).until(EC.visibility_of_element_located((By.CSS_SELECTOR, "li[class*='sc-1u4589e-0']")))
     except: pass
     time.sleep(3)
+
+# 設定：何回追加読み込みするか
+    MAX_LOAD_COUNT = 3
+
+    for i in range(MAX_LOAD_COUNT):
+        try:
+            # 要素を待機
+            more_button = WebDriverWait(driver, 10).until(
+                EC.presence_of_element_located((By.XPATH, "//button[span[contains(text(), 'もっと見る')]]"))
+            )
+            
+            # ボタンの位置までスクロール（これを入れると安定します）
+            driver.execute_script("arguments[0].scrollIntoView({behavior: 'smooth', block: 'center'});", more_button)
+            time.sleep(1) # スクロール後の安定待ち
+
+            # クリック実行
+            driver.execute_script("arguments[0].click();", more_button)
+            print(f"  - 「もっと見る」ボタン押下 ({i+1}/{MAX_LOAD_COUNT})")
+            
+            # 読み込み待ち（通信環境に合わせて調整）
+            time.sleep(3) 
+            
+        except Exception as e:
+            print("  - これ以上ボタンがないか、エラーが発生したため終了します")
+            break
+    # ------------------------------------
+
     soup = BeautifulSoup(driver.page_source, "html.parser")
     driver.quit()
     data = []
