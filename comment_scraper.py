@@ -289,17 +289,19 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         
         if url in existing_urls: continue
 
+
+
         # --- 条件判定 ---
         is_target = False
-        
-        # 1. 共通の前提条件: 日産系 かつ 「その他」以外 かつ コメントあり
-        if target_company.startswith("日産") and "その他" not in category and comment_cnt > 0:
-            
-            # 条件①: コメント数が100件以上
-            if comment_cnt >= 100:
-                is_target = True
-            
-            # 条件②: 日産ネガ文に記載がある ("なし" 以外)
+
+        # 共通の前提条件: カテゴリーが「その他」で始まらない かつ コメントあり
+        if not category.startswith("その他") and comment_cnt > 0:
+    
+            # 条件①: 対象企業が日産系 かつ コメント数が100件以上
+            if target_company.startswith("日産") and comment_cnt >= 100:
+            is_target = True
+    
+            # 条件②: 日産ネガ文に記載がある ("なし" 以外) ※条件①を満たしていない場合のみ判定
             if not is_target:
                 val = str(nissan_neg_text).strip()
                 if val and val not in ["なし", "N/A", "N/A(No Body)", "-"]:
@@ -352,3 +354,4 @@ def run_comment_collection(gc: gspread.Client, source_sheet_id: str, source_shee
         set_row_height(dest_ws, 21)
 
     print(f" ? コメント収集・要約完了: 新たに {process_count} 件処理しました。")
+
