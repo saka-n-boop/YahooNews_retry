@@ -6,15 +6,36 @@ on:
   schedule:
     - cron: '25 05 * * *'
 
-concurrency:
-  group: yahoo-news-scraper-and-gemini-analyzer
-  cancel-in-progress: false
+# ワークフローをキャンセルする権限などを設定
+permissions:
+  actions: write
+  contents: read
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
 
     steps:
+      # 重複実行チェックと自己キャンセルのステップ
+      - name: Check for running workflow
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 同じワークフローで実行中(in_progress)のものを取得
+          RUNNING_WORKFLOWS=$(gh run list --workflow "${{ github.workflow }}" --status in_progress --json databaseId --jq '.[].databaseId')
+          
+          CURRENT_ID=${{ github.run_id }}
+          
+          # 自分以外の実行中IDがあれば、自分自身をキャンセルする
+          for id in $RUNNING_WORKFLOWS; do
+            if [ "$id" != "$CURRENT_ID" ]; then
+              echo "Already running (Run ID: $id). Cancelling this run."
+              gh run cancel $CURRENT_ID
+              sleep 60 # キャンセル処理が完了するのを待機
+            fi
+          done
+          echo "No other running workflows found. Proceeding..."
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
