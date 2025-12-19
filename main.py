@@ -229,7 +229,7 @@ def update_sheet_with_retry(ws, range_name, values, max_retries=3):
                 time.sleep(30 * (attempt + 1))
             else: raise e
         except Exception:
-            time.sleep(10 * (attempt + 1))
+            time.sleep(30 * (attempt + 1))
     print(f"  !! 更新失敗: {range_name}")
 
 # ====== Gemini 共通呼び出し関数 (修正版) ======
