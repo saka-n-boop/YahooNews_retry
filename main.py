@@ -665,14 +665,23 @@ def main():
     try: gc = build_gspread_client()
     except Exception as e: print(f"致命的エラー: {e}"); sys.exit(1)
     
+    # 合計カウント用の変数
+    total_new_articles_count = 0
+    
     for k in keys:
         print(f"\n===== １ 取得: {k} =====")
         data = get_yahoo_news_with_selenium(k)
         ws = ensure_source_sheet(gc)
         exist = set(str(r[0]) for r in ws.get_all_values()[1:] if len(r)>0 and str(r[0]).startswith("http"))
         new = [[d['URL'], d['タイトル'], d['投稿日時'], d['ソース']] for d in data if d['URL'] not in exist]
-        if new: ws.append_rows(new, value_input_option='USER_ENTERED')
+        if new: 
+            ws.append_rows(new, value_input_option='USER_ENTERED')
+            # 合計のカウント
+            total_new_articles_count += len(new)
         time.sleep(2)
+
+    # 追加新規記事数の表示
+    print(f"\n★ 新規追加記事数: 合計 {total_new_articles_count} 件")
 
     print("\n===== ２ 詳細取得 =====")
     fetch_details_and_update_sheet(gc)
